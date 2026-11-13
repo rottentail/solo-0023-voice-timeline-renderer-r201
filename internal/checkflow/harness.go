@@ -33,6 +33,14 @@ func NewHarness() (*Harness, error) {
 		_ = os.RemoveAll(tempDir)
 		return nil, err
 	}
+	harness := NewHarnessWithRepository(repo)
+	harness.tempDir = tempDir
+	return harness, nil
+}
+
+// NewHarnessWithRepository starts the real HTTP handler on top of a caller
+// supplied repository so checks can exercise storage failure paths.
+func NewHarnessWithRepository(repo service.Repository) *Harness {
 	serviceLayer := service.New(repo, service.DefaultConfig())
 	httpServer := httpapi.New(serviceLayer, httpapi.Options{
 		MaxSourceRequestBytes: 48 << 20,
@@ -42,14 +50,15 @@ func NewHarness() (*Harness, error) {
 	return &Harness{
 		baseURL: server.URL,
 		client:  &http.Client{Timeout: 45 * time.Second},
-		tempDir: tempDir,
 		server:  server,
-	}, nil
+	}
 }
 
 func (harness *Harness) Close() {
 	harness.server.Close()
-	_ = os.RemoveAll(harness.tempDir)
+	if harness.tempDir != "" {
+		_ = os.RemoveAll(harness.tempDir)
+	}
 }
 
 func (harness *Harness) requestJSON(

@@ -15,6 +15,7 @@ type Limits struct {
 
 type Result struct {
 	WAV     []byte
+	Stems   []StemResult
 	Receipt domain.RenderReceipt
 	Output  domain.OutputAsset
 }
@@ -36,6 +37,9 @@ func Render(
 	}
 	if limits.MaxOutputFrames > 0 && totalFrames > limits.MaxOutputFrames {
 		return Result{}, errors.New("rendered timeline exceeds the configured frame limit")
+	}
+	if len(plan.DeliveryGroups) > 0 {
+		return renderGrouped(ctx, renderID, plan, spans, totalFrames, now)
 	}
 	mix, _, err := mixPrepared(ctx, spans, totalFrames, plan.OutputChannels)
 	if err != nil {

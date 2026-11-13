@@ -103,6 +103,28 @@
         "render",
         "storage"
       ]
+    },
+    {
+      "id": "render-stem-delivery",
+      "name": "Render grouped stem delivery",
+      "entry": "PUT /v1/renders/{render_id}",
+      "steps": [
+        "Declare delivery groups on the timeline and assign every span to one group",
+        "Accumulate span contributions per group with fades only inside a group",
+        "Apply the master-derived normalization gain to the master and every stem",
+        "Commit the master, all stems, and the receipt as one atomic delivery"
+      ],
+      "success": "Returns a completed job whose time-aligned master and stems share one gain, and whose unquantized stem sum reconstructs the master production signal.",
+      "failure": "A failed stem write fails the job and publishes no partial delivery.",
+      "verification": "The workflow check renders a grouped timeline, downloads the master and stems, confirms the quantized stem sum reconstructs the master within the receipt's quantization bound, probes same-group and cross-group junction behavior, and verifies failed commits stay invisible.",
+      "module_ids": [
+        "httpapi",
+        "service",
+        "domain",
+        "audiocodec",
+        "render",
+        "storage"
+      ]
     }
   ]
 }

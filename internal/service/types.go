@@ -15,21 +15,24 @@ type Repository interface {
 	GetTimeline(string) (domain.Timeline, error)
 	SaveJob(domain.RenderJob) error
 	GetJob(string) (domain.RenderJob, error)
-	CommitRenderArtifacts(string, []byte, domain.RenderReceipt) error
+	CommitRenderArtifacts(string, []byte, []domain.StemDelivery, domain.RenderReceipt) error
 	GetRenderOutput(string) ([]byte, domain.RenderReceipt, error)
+	GetRenderStem(string, string) ([]byte, error)
 }
 
 type Config struct {
-	MaxSourceBytes  int64
-	MaxSpans        int
-	MaxOutputFrames int64
+	MaxSourceBytes    int64
+	MaxSpans          int
+	MaxOutputFrames   int64
+	MaxDeliveryGroups int
 }
 
 func DefaultConfig() Config {
 	return Config{
-		MaxSourceBytes:  32 << 20,
-		MaxSpans:        64,
-		MaxOutputFrames: 48000 * 180,
+		MaxSourceBytes:    32 << 20,
+		MaxSpans:          64,
+		MaxOutputFrames:   48000 * 180,
+		MaxDeliveryGroups: 32,
 	}
 }
 
@@ -50,6 +53,9 @@ func New(repo Repository, config Config) *Service {
 	if config.MaxOutputFrames <= 0 {
 		config.MaxOutputFrames = defaults.MaxOutputFrames
 	}
+	if config.MaxDeliveryGroups <= 0 {
+		config.MaxDeliveryGroups = defaults.MaxDeliveryGroups
+	}
 	return &Service{repo: repo, config: config}
 }
 
@@ -59,11 +65,12 @@ type SourceWriteRequest struct {
 }
 
 type TimelineWriteRequest struct {
-	Name           string                `json:"name"`
-	SampleRate     int                   `json:"sample_rate"`
-	OutputChannels int                   `json:"output_channels"`
-	TargetPeakDBFS float64               `json:"target_peak_dbfs"`
-	Spans          []domain.TimelineSpan `json:"spans"`
+	Name           string                 `json:"name"`
+	SampleRate     int                    `json:"sample_rate"`
+	OutputChannels int                    `json:"output_channels"`
+	TargetPeakDBFS float64                `json:"target_peak_dbfs"`
+	DeliveryGroups []domain.DeliveryGroup `json:"delivery_groups"`
+	Spans          []domain.TimelineSpan  `json:"spans"`
 }
 
 type RenderWriteRequest struct {
@@ -117,4 +124,24 @@ func (s *Service) GetOutput(ctx context.Context, id string) ([]byte, domain.Rend
 		return nil, domain.RenderReceipt{}, domain.E(domain.KindUnready, "render_not_completed", "render_id", "render output is available only after completion")
 	}
 	return s.repo.GetRenderOutput(id)
+}
+
+// GetStem returns the encoded stem of one delivery group of a completed
+// render. A render that failed or is still active never exposes stems, so a
+// partially committed delivery can never be mistaken for a complete one.
+func (s *Service) GetStem(ctx context.Context, id string, groupID string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := domain.ValidateGroupID("group", groupID); err != nil {
+		return nil, err
+	}
+	job, err := s.GetRender(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if job.State != domain.RenderCompleted {
+		return nil, domain.E(domain.KindUnready, "render_not_completed", "render_id", "render stems are available only after completion")
+	}
+	return s.repo.GetRenderStem(id, groupID)
 }

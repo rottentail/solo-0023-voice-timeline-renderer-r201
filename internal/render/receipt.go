@@ -51,6 +51,7 @@ func buildReceipt(
 			CrossfadeFrames:  span.CrossfadeFrames,
 			GainDB:           span.GainDB,
 			ChannelAction:    span.ChannelAction,
+			GroupID:          span.GroupID,
 		})
 		if span.ChannelAction != "unchanged" {
 			warnings = append(warnings, fmt.Sprintf("span %d applied %s", span.Index, span.ChannelAction))
@@ -79,4 +80,41 @@ func framesToMilliseconds(frames int64, sampleRate int) int64 {
 		return 0
 	}
 	return int64(float64(frames) * 1000 / float64(sampleRate))
+}
+
+// buildStemReceipt measures one encoded stem from its final bytes so the
+// receipt always describes the published file.
+func buildStemReceipt(group stemGroup, spans []preparedSpan, encoded []byte) (domain.StemReceipt, error) {
+	decoded, info, err := audiocodec.DecodeWAV(encoded)
+	if err != nil {
+		return domain.StemReceipt{}, err
+	}
+	measurements := audiocodec.Measure(decoded.Samples)
+	digest := sha256.Sum256(encoded)
+	spanIndices := make([]int, 0, len(group.spans))
+	sourceIDs := make([]string, 0, len(group.spans))
+	seen := make(map[string]bool, len(group.spans))
+	for _, position := range group.spans {
+		spanIndices = append(spanIndices, spans[position].Index)
+		if !seen[spans[position].SourceID] {
+			seen[spans[position].SourceID] = true
+			sourceIDs = append(sourceIDs, spans[position].SourceID)
+		}
+	}
+	return domain.StemReceipt{
+		GroupID:       group.id,
+		Label:         group.label,
+		File:          "stems/" + group.id + ".wav",
+		Digest:        hex.EncodeToString(digest[:]),
+		ByteCount:     int64(len(encoded)),
+		SampleRate:    info.SampleRate,
+		Channels:      info.Channels,
+		BitsPerSample: info.BitsPerSample,
+		FrameCount:    info.FrameCount,
+		DurationMS:    framesToMilliseconds(info.FrameCount, info.SampleRate),
+		PeakDBFS:      measurements.PeakDBFS,
+		RMSDBFS:       measurements.RMSDBFS,
+		SpanIndices:   spanIndices,
+		SourceIDs:     sourceIDs,
+	}, nil
 }

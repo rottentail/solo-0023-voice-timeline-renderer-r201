@@ -55,3 +55,18 @@ func (server *Server) handleOutputRead(w http.ResponseWriter, request *http.Requ
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(payload)
 }
+
+func (server *Server) handleStemRead(w http.ResponseWriter, request *http.Request) {
+	renderID := request.PathValue("id")
+	groupID := request.PathValue("group")
+	payload, err := server.service.GetStem(request.Context(), renderID, groupID)
+	if err != nil {
+		writeError(w, err, nil)
+		return
+	}
+	w.Header().Set("Content-Type", "audio/wav")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(payload)))
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", renderID+"-"+groupID+".wav"))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(payload)
+}

@@ -8,6 +8,8 @@ import (
 
 var resourceIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{2,63}$`)
 
+var groupIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
+
 type SourceFacts struct {
 	SampleRate    int
 	Channels      int
@@ -22,6 +24,20 @@ func ValidateResourceID(field, value string) error {
 			"invalid_id",
 			field,
 			"identifier must be 3-64 characters using letters, digits, underscore, or hyphen",
+		)
+	}
+	return nil
+}
+
+// ValidateGroupID checks a delivery group identifier. Group identifiers are
+// used in stem file names and download paths, so they exclude separators.
+func ValidateGroupID(field, value string) error {
+	if !groupIDPattern.MatchString(value) {
+		return E(
+			KindInvalid,
+			"invalid_delivery_group",
+			field,
+			"delivery group identifier must be 1-64 characters using letters, digits, underscore, or hyphen",
 		)
 	}
 	return nil
@@ -51,7 +67,7 @@ func ValidateSourceFacts(field string, facts SourceFacts) error {
 	return nil
 }
 
-func ValidateTimeline(plan Timeline, sources map[string]SourceAsset, maxSpans int, maxOutputFrames int64) error {
+func ValidateTimeline(plan Timeline, sources map[string]SourceAsset, maxSpans int, maxOutputFrames int64, maxGroups int) error {
 	if err := ValidateResourceID("timeline_id", plan.ID); err != nil {
 		return err
 	}
@@ -69,6 +85,9 @@ func ValidateTimeline(plan Timeline, sources map[string]SourceAsset, maxSpans in
 	}
 	if len(plan.Spans) < 1 || len(plan.Spans) > maxSpans {
 		return E(KindInvalid, "invalid_span_count", "spans", "timeline span count is outside the allowed range")
+	}
+	if err := validateDeliveryGroups(plan, maxGroups); err != nil {
+		return err
 	}
 
 	cursor := int64(0)
@@ -116,6 +135,64 @@ func ValidateTimeline(plan Timeline, sources map[string]SourceAsset, maxSpans in
 		previousFrames = outputFrames
 		if cursor > maxOutputFrames {
 			return E(KindTooLarge, "timeline_too_long", "spans", "timeline output exceeds the configured frame limit")
+		}
+	}
+	return nil
+}
+
+// validateDeliveryGroups enforces the stem grouping contract: when groups are
+// declared every span references exactly one declared group and every group
+// is used; without declared groups no span may carry a group reference.
+func validateDeliveryGroups(plan Timeline, maxGroups int) error {
+	if len(plan.DeliveryGroups) == 0 {
+		for index, span := range plan.Spans {
+			if span.GroupID != "" {
+				return E(
+					KindInvalid,
+					"invalid_delivery_group",
+					"spans["+intString(index)+"].group_id",
+					"span references a delivery group but the timeline declares none",
+				)
+			}
+		}
+		return nil
+	}
+	if maxGroups > 0 && len(plan.DeliveryGroups) > maxGroups {
+		return E(KindInvalid, "invalid_delivery_group", "delivery_groups", "timeline declares too many delivery groups")
+	}
+	declared := make(map[string]bool, len(plan.DeliveryGroups))
+	for index, group := range plan.DeliveryGroups {
+		field := "delivery_groups[" + intString(index) + "]"
+		if err := ValidateGroupID(field+".id", group.ID); err != nil {
+			return err
+		}
+		if declared[group.ID] {
+			return E(KindInvalid, "invalid_delivery_group", field+".id", "delivery group identifier is declared more than once")
+		}
+		declared[group.ID] = true
+		if len(group.Label) > 120 {
+			return E(KindInvalid, "invalid_delivery_group", field+".label", "delivery group label must contain at most 120 characters")
+		}
+	}
+	used := make(map[string]bool, len(plan.DeliveryGroups))
+	for index, span := range plan.Spans {
+		field := "spans[" + intString(index) + "].group_id"
+		if span.GroupID == "" {
+			return E(KindInvalid, "invalid_delivery_group", field, "span must reference a declared delivery group")
+		}
+		if !declared[span.GroupID] {
+			return E(KindInvalid, "invalid_delivery_group", field, "span references an undeclared delivery group")
+		}
+		used[span.GroupID] = true
+	}
+	for index, group := range plan.DeliveryGroups {
+		if !used[group.ID] {
+			return E(
+				KindInvalid,
+				"invalid_delivery_group",
+				"delivery_groups["+intString(index)+"].id",
+				"declared delivery group is not used by any span",
+			)
 		}
 	}
 	return nil

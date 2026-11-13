@@ -80,10 +80,19 @@ func (s *Service) CreateRender(
 	if err := s.advanceJob(&job, domain.RenderFinalizing, nil); err != nil {
 		return job, true, err
 	}
-	if err := s.repo.CommitRenderArtifacts(id, result.WAV, result.Receipt); err != nil {
+	stems := make([]domain.StemDelivery, 0, len(result.Stems))
+	summaries := make([]domain.StemReceipt, 0, len(result.Stems))
+	for _, stem := range result.Stems {
+		stems = append(stems, domain.StemDelivery{GroupID: stem.GroupID, WAV: stem.WAV})
+		summaries = append(summaries, stem.Receipt)
+	}
+	if err := s.repo.CommitRenderArtifacts(id, result.WAV, stems, result.Receipt); err != nil {
 		return s.failRender(job, err)
 	}
 	job.Output = &result.Output
+	if len(summaries) > 0 {
+		job.Stems = summaries
+	}
 	job.ReceiptDigest = result.Output.Digest
 	if err := s.advanceJob(&job, domain.RenderCompleted, nil); err != nil {
 		return job, true, err
@@ -113,6 +122,7 @@ func (s *Service) failRender(job domain.RenderJob, cause error) (domain.RenderJo
 		return job, true, transitionErr
 	}
 	job.Output = nil
+	job.Stems = nil
 	job.ReceiptDigest = ""
 	if saveErr := s.repo.SaveJob(job); saveErr != nil {
 		return job, true, saveErr

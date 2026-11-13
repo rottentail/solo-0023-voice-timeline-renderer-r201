@@ -62,13 +62,21 @@ func (harness *Harness) createTimeline(
 	targetPeak float64,
 	spans []domain.TimelineSpan,
 ) (domain.Timeline, int, error) {
-	status, body, err := harness.requestJSON(ctx, "PUT", "/v1/timelines/"+id, service.TimelineWriteRequest{
+	return harness.putTimeline(ctx, id, service.TimelineWriteRequest{
 		Name:           name,
 		SampleRate:     sampleRate,
 		OutputChannels: channels,
 		TargetPeakDBFS: targetPeak,
 		Spans:          spans,
 	})
+}
+
+func (harness *Harness) putTimeline(
+	ctx context.Context,
+	id string,
+	payload service.TimelineWriteRequest,
+) (domain.Timeline, int, error) {
+	status, body, err := harness.requestJSON(ctx, "PUT", "/v1/timelines/"+id, payload)
 	if err != nil {
 		return domain.Timeline{}, status, err
 	}
@@ -164,6 +172,23 @@ func (harness *Harness) getOutput(
 		var envelope failureEnvelope
 		_ = decodeBody(body, &envelope)
 		return nil, status, fmt.Errorf("unexpected output status %d with error %s", status, envelope.Error.Code)
+	}
+	return body, status, nil
+}
+
+func (harness *Harness) getStem(
+	ctx context.Context,
+	id string,
+	group string,
+) ([]byte, int, error) {
+	status, body, err := harness.requestJSON(ctx, "GET", "/v1/renders/"+id+"/stems/"+group, nil)
+	if err != nil {
+		return nil, status, err
+	}
+	if status != 200 {
+		var envelope failureEnvelope
+		_ = decodeBody(body, &envelope)
+		return nil, status, fmt.Errorf("unexpected stem status %d with error %s", status, envelope.Error.Code)
 	}
 	return body, status, nil
 }

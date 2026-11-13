@@ -45,7 +45,9 @@ Invariants:
 
 A timeline is an ordered set of spans over existing source assets. A span
 selects a half-open source frame interval, a gain in decibels, and an optional
-crossfade with the preceding span.
+crossfade with the preceding span. A timeline may also declare delivery
+groups; each span then belongs to exactly one declared group, and one render
+delivers a time-aligned master plus one stem per group.
 
 Invariants:
 
@@ -56,6 +58,9 @@ Invariants:
 - A crossfade cannot exceed the shorter neighboring span.
 - Output channel count is explicit and independent from an input source's
   channel count.
+- When delivery groups are declared, every span references a declared group
+  and every declared group is used by at least one span; without declared
+  groups no span carries a group reference.
 
 ### Render job
 
@@ -67,14 +72,17 @@ State machine:
 
 Any active state may transition to `failed`. `completed` and `failed` are
 terminal. A failed job stores a stable error code and message. A completed job
-stores the output file, output metadata, and immutable render receipt.
+stores the output file, output metadata, delivered stem summaries, and
+immutable render receipt.
 
 ### Render receipt
 
 A receipt records source identifiers, span placement, gain adjustments, peak
-and RMS measurements, final normalization gain, frame count, output digest, and
-non-fatal warnings. It is written only after the output bytes have been
-atomically committed.
+and RMS measurements, final normalization gain, frame count, output digest,
+and non-fatal warnings. Grouped renders add a delivery section with the shared
+normalization gain, the quantization policy, the stem reconstruction bound,
+and per-stem digests, frames, and sources. It is written only after the
+output bytes have been atomically committed.
 
 ## Workflows
 
@@ -122,6 +130,29 @@ Entry point: `PUT /v1/renders/{render_id}` with a `timeline_id` body field.
 Success is observable through the job resource, the downloaded WAV, and the
 receipt. Failure is observable through the terminal job error code.
 
+### 4. Render stem delivery
+
+Entry point: `PUT /v1/renders/{render_id}` on a timeline with declared
+delivery groups.
+
+1. The render executes as in workflow 3, but span contributions are
+   accumulated per delivery group with fades applied only between spans of
+   the same group; cross-group junctions keep both neighbors at full gain.
+2. The normalization gain is derived from the master production signal and
+   applied unchanged to the master and every stem, preserving relative stem
+   loudness; the unquantized stem buffers sum exactly to the unquantized
+   master.
+3. The finalizing stage encodes the master and one time-aligned stem per
+   group with the same deterministic 16-bit quantization, and commits all
+   files plus the receipt through one staged directory rename.
+4. If any stem write fails, the job moves to `failed` and no partial delivery
+   is published.
+
+Success is observable through the job's stem summaries, the downloadable
+stems under `GET /v1/renders/{render_id}/stems/{group_id}`, and the receipt's
+delivery section, which states the shared gain, the quantization policy, and
+the per-sample deviation bound that the 16-bit deliveries satisfy.
+
 ## HTTP interface
 
 - `GET /healthz`
@@ -133,6 +164,7 @@ receipt. Failure is observable through the terminal job error code.
 - `GET /v1/renders/{id}`
 - `GET /v1/renders/{id}/receipt`
 - `GET /v1/renders/{id}/output`
+- `GET /v1/renders/{id}/stems/{group_id}`
 
 Errors use a JSON envelope:
 
@@ -176,6 +208,10 @@ The runtime manifest exposes one bounded production smoke path per workflow:
   fails.
 - Render a crossfaded timeline, download the output, decode it, and match core
   receipt measurements.
+- Render a grouped timeline, download the master and stems, confirm the
+  quantized stem sum reconstructs the master within the receipt's stated
+  quantization bound, probe same-group and cross-group junction behavior, and
+  confirm a failed commit publishes no partial delivery.
 
 These checks use the real HTTP entry points and local storage. They are not a
 replacement for the test suite that the later task stage will add.

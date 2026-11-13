@@ -23,18 +23,27 @@ type TimelineSpan struct {
 	SourceEndFrame   int64   `json:"source_end_frame"`
 	GainDB           float64 `json:"gain_db"`
 	CrossfadeFrames  int64   `json:"crossfade_frames"`
+	GroupID          string  `json:"group_id,omitempty"`
+}
+
+// DeliveryGroup declares one stem group of a timeline. Every span belongs to
+// exactly one declared group when groups are present.
+type DeliveryGroup struct {
+	ID    string `json:"id"`
+	Label string `json:"label,omitempty"`
 }
 
 type Timeline struct {
-	ID             string         `json:"id"`
-	Name           string         `json:"name"`
-	SampleRate     int            `json:"sample_rate"`
-	OutputChannels int            `json:"output_channels"`
-	TargetPeakDBFS float64        `json:"target_peak_dbfs"`
-	Spans          []TimelineSpan `json:"spans"`
-	State          string         `json:"state"`
-	OutputFrames   int64          `json:"output_frames"`
-	CreatedAt      time.Time      `json:"created_at"`
+	ID             string          `json:"id"`
+	Name           string          `json:"name"`
+	SampleRate     int             `json:"sample_rate"`
+	OutputChannels int             `json:"output_channels"`
+	TargetPeakDBFS float64         `json:"target_peak_dbfs"`
+	DeliveryGroups []DeliveryGroup `json:"delivery_groups,omitempty"`
+	Spans          []TimelineSpan  `json:"spans"`
+	State          string          `json:"state"`
+	OutputFrames   int64           `json:"output_frames"`
+	CreatedAt      time.Time       `json:"created_at"`
 }
 
 type RenderState string
@@ -60,14 +69,15 @@ type OutputAsset struct {
 }
 
 type RenderJob struct {
-	ID            string       `json:"id"`
-	TimelineID    string       `json:"timeline_id"`
-	State         RenderState  `json:"state"`
-	Error         *ErrorDetail `json:"error,omitempty"`
-	Output        *OutputAsset `json:"output,omitempty"`
-	ReceiptDigest string       `json:"receipt_digest,omitempty"`
-	CreatedAt     time.Time    `json:"created_at"`
-	UpdatedAt     time.Time    `json:"updated_at"`
+	ID            string        `json:"id"`
+	TimelineID    string        `json:"timeline_id"`
+	State         RenderState   `json:"state"`
+	Error         *ErrorDetail  `json:"error,omitempty"`
+	Output        *OutputAsset  `json:"output,omitempty"`
+	Stems         []StemReceipt `json:"stems,omitempty"`
+	ReceiptDigest string        `json:"receipt_digest,omitempty"`
+	CreatedAt     time.Time     `json:"created_at"`
+	UpdatedAt     time.Time     `json:"updated_at"`
 }
 
 type ReceiptSpan struct {
@@ -82,6 +92,56 @@ type ReceiptSpan struct {
 	CrossfadeFrames  int64   `json:"crossfade_frames"`
 	GainDB           float64 `json:"gain_db"`
 	ChannelAction    string  `json:"channel_action"`
+	GroupID          string  `json:"group_id,omitempty"`
+}
+
+// StemReceipt describes one delivered stem file. The same summary is stored
+// on the completed render job and inside the render receipt delivery section.
+type StemReceipt struct {
+	GroupID       string   `json:"group_id"`
+	Label         string   `json:"label,omitempty"`
+	File          string   `json:"file"`
+	Digest        string   `json:"digest"`
+	ByteCount     int64    `json:"byte_count"`
+	SampleRate    int      `json:"sample_rate"`
+	Channels      int      `json:"channels"`
+	BitsPerSample int      `json:"bits_per_sample"`
+	FrameCount    int64    `json:"frame_count"`
+	DurationMS    int64    `json:"duration_ms"`
+	PeakDBFS      float64  `json:"peak_dbfs"`
+	RMSDBFS       float64  `json:"rms_dbfs"`
+	SpanIndices   []int    `json:"span_indices"`
+	SourceIDs     []string `json:"source_ids"`
+}
+
+// QuantizationReceipt documents the exact 16-bit quantization applied to the
+// master and every stem so delivery deviations can be reproduced.
+type QuantizationReceipt struct {
+	Format   string  `json:"format"`
+	Rounding string  `json:"rounding"`
+	Dither   string  `json:"dither"`
+	LSB      float64 `json:"lsb"`
+}
+
+// ReconstructionReceipt states how the delivered stems relate to the master.
+type ReconstructionReceipt struct {
+	Rule            string  `json:"rule"`
+	MaxDeviationLSB float64 `json:"max_deviation_lsb"`
+}
+
+// DeliveryReceipt records the shared normalization gain applied to the master
+// and every stem, the quantization policy, and the per-stem summaries.
+type DeliveryReceipt struct {
+	SharedGainDB   float64               `json:"shared_gain_db"`
+	Quantization   QuantizationReceipt   `json:"quantization"`
+	Reconstruction ReconstructionReceipt `json:"reconstruction"`
+	Stems          []StemReceipt         `json:"stems"`
+}
+
+// StemDelivery carries one encoded stem payload toward durable storage.
+type StemDelivery struct {
+	GroupID string
+	WAV     []byte
 }
 
 type NormalizationReceipt struct {
@@ -98,6 +158,7 @@ type RenderReceipt struct {
 	Output        OutputAsset          `json:"output"`
 	Normalization NormalizationReceipt `json:"normalization"`
 	Spans         []ReceiptSpan        `json:"spans"`
+	Delivery      *DeliveryReceipt     `json:"delivery,omitempty"`
 	Warnings      []string             `json:"warnings"`
 	CreatedAt     time.Time            `json:"created_at"`
 }

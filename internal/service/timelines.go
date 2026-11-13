@@ -22,6 +22,7 @@ func (s *Service) CreateTimeline(ctx context.Context, id string, request Timelin
 		SampleRate:     request.SampleRate,
 		OutputChannels: request.OutputChannels,
 		TargetPeakDBFS: request.TargetPeakDBFS,
+		DeliveryGroups: append([]domain.DeliveryGroup(nil), request.DeliveryGroups...),
 		Spans:          append([]domain.TimelineSpan(nil), request.Spans...),
 		State:          "validating",
 	}
@@ -55,7 +56,7 @@ func (s *Service) CreateTimeline(ctx context.Context, id string, request Timelin
 		}
 		sources[span.SourceID] = asset
 	}
-	if err := domain.ValidateTimeline(candidate, sources, s.config.MaxSpans, s.config.MaxOutputFrames); err != nil {
+	if err := domain.ValidateTimeline(candidate, sources, s.config.MaxSpans, s.config.MaxOutputFrames, s.config.MaxDeliveryGroups); err != nil {
 		return domain.Timeline{}, false, err
 	}
 	candidate.OutputFrames = domain.TimelineOutputFrames(candidate, sources)
@@ -72,8 +73,15 @@ func equivalentTimeline(left, right domain.Timeline) bool {
 		left.SampleRate != right.SampleRate ||
 		left.OutputChannels != right.OutputChannels ||
 		math.Abs(left.TargetPeakDBFS-right.TargetPeakDBFS) > 1e-9 ||
+		len(left.DeliveryGroups) != len(right.DeliveryGroups) ||
 		len(left.Spans) != len(right.Spans) {
 		return false
+	}
+	for index := range left.DeliveryGroups {
+		if left.DeliveryGroups[index].ID != right.DeliveryGroups[index].ID ||
+			left.DeliveryGroups[index].Label != right.DeliveryGroups[index].Label {
+			return false
+		}
 	}
 	for index := range left.Spans {
 		a := left.Spans[index]
@@ -82,7 +90,8 @@ func equivalentTimeline(left, right domain.Timeline) bool {
 			a.SourceStartFrame != b.SourceStartFrame ||
 			a.SourceEndFrame != b.SourceEndFrame ||
 			math.Abs(a.GainDB-b.GainDB) > 1e-9 ||
-			a.CrossfadeFrames != b.CrossfadeFrames {
+			a.CrossfadeFrames != b.CrossfadeFrames ||
+			a.GroupID != b.GroupID {
 			return false
 		}
 	}
